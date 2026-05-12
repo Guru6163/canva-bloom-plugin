@@ -1,6 +1,11 @@
-import type { ImageRef } from "@canva/asset";
+import type { ImageMimeType, ImageRef } from "@canva/asset";
 import { upload } from "@canva/asset";
-import { addElementAtCursor } from "@canva/design";
+import { useFeatureSupport } from "@canva/app-hooks";
+import {
+  addElementAtCursor,
+  addElementAtPoint,
+  getDesignMetadata,
+} from "@canva/design";
 import type { Brand } from "./api";
 import {
   checkCredits,
@@ -30,6 +35,7 @@ import {
   LoadingIndicator,
   MultilineInput,
   Pill,
+  ProgressBar,
   Rows,
   SegmentedControl,
   Text,
@@ -62,6 +68,54 @@ export interface RecentImage {
 const sleep = (ms: number) => new Promise<void>((resolve) => {
   setTimeout(resolve, ms);
 });
+
+/**
+ * Converts an image URL to a data URL with correct MIME type.
+ * Required because Canva's upload() needs a data URL, not an
+ * external URL, to properly handle CORS and image format.
+ */
+async function toDataUrl(url: string): Promise<{ dataUrl: string; mimeType: string }> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch image (${res.status})`);
+  }
+  const headerMime =
+    res.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+  const blob = await res.blob();
+  const mimeType =
+    blob.type && blob.type !== "application/octet-stream"
+      ? blob.type
+      : headerMime || "image/jpeg";
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (typeof reader.result === "string") {
+        resolve(reader.result);
+      } else {
+        reject(new Error("Could not read image as data URL"));
+      }
+    };
+    reader.onerror = () => {
+      reject(new Error("Could not read image as data URL"));
+    };
+    reader.readAsDataURL(blob);
+  });
+  return { dataUrl, mimeType };
+}
+
+function normalizeImageMimeType(raw: string): ImageMimeType {
+  const allowed: ImageMimeType[] = [
+    "image/jpeg",
+    "image/heic",
+    "image/png",
+    "image/svg+xml",
+    "image/webp",
+    "image/tiff",
+  ];
+  return allowed.includes(raw as ImageMimeType)
+    ? (raw as ImageMimeType)
+    : "image/jpeg";
+}
 
 const MAX_ONBOARD_POLLS = 150;
 const MAX_PROMPT_LEN = 500;
@@ -192,13 +246,32 @@ export function App() {
     readRecentImagesFromStorage(),
   );
   const [loadingRecentImages, setLoadingRecentImages] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [results, setResults] = useState<GeneratedResult[]>([]);
+  const [selectedResult, setSelectedResult] = useState("");
+  const [inserting, setInserting] = useState(false);
+  const [insertingImageId, setInsertingImageId] = useState("");
+  const [insertError, setInsertError] = useState("");
+  const [generatingContext, setGeneratingContext] = useState<{
+    prompt: string;
+    variants: number;
+    aspectRatio: string;
+  } | null>(null);
 
   const isMounted = useRef(true);
+  const progressIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
+    null,
+  );
+  const isSupported = useFeatureSupport();
   useEffect(() => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
+      if (progressIntervalRef.current != null) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
     };
   }, []);
 
@@ -390,6 +463,10 @@ export function App() {
    * Called when user wants to change their API key.
    */
   const handleReset = () => {
+    if (progressIntervalRef.current != null) {
+      clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = null;
+    }
     localStorage.removeItem(STORAGE_KEYS.API_KEY);
     localStorage.removeItem(STORAGE_KEYS.BRAND_ID);
     localStorage.removeItem(STORAGE_KEYS.PROMPT_HISTORY);
@@ -411,6 +488,14 @@ export function App() {
     setGenerationError("");
     setGeneratorTab("create");
     setRecentImages([]);
+    setGenerating(false);
+    setProgress(0);
+    setResults([]);
+    setSelectedResult("");
+    setInserting(false);
+    setInsertingImageId("");
+    setInsertError("");
+    setGeneratingContext(null);
     setView("setup");
   };
 
@@ -519,30 +604,150 @@ export function App() {
     }
   }, [view, apiKey, loadCredits, loadRecentGeneratedImages]);
 
+  /**
+   * Uploads a Bloom image to Canva and inserts it into the design.
+   * Flow:
+   *   1. Fetch image URL → convert to data URL (toDataUrl)
+   *   2. Upload to Canva asset CDN via upload()
+   *   3. Wait for upload: queued.whenUploaded()
+   *   4. Insert into design via addElementAtCursor or addElementAtPoint
+   * The upload step is required — Canva cannot insert external URLs directly.
+   */
+  const uploadAndInsertFromUrl = useCallback(
+    async (url: string) => {
+      const { dataUrl, mimeType } = await toDataUrl(url);
+      const imageMime = normalizeImageMimeType(mimeType);
+      const queue = await upload({
+        type: "image",
+        url: dataUrl,
+        mimeType: imageMime,
+        thumbnailUrl: dataUrl,
+        aiDisclosure: "app_generated",
+      });
+      await queue.whenUploaded();
+      const ref = queue.ref as ImageRef;
+      const altText = { text: "Bloom image", decorative: false };
+
+      if (isSupported(addElementAtPoint)) {
+        const { defaultPageDimensions: dims } = await getDesignMetadata();
+        if (dims) {
+          const width = Math.min(480, dims.width * 0.45);
+          const height = Math.min(480, dims.height * 0.45);
+          await addElementAtPoint({
+            type: "image",
+            ref,
+            altText,
+            top: Math.max(0, (dims.height - height) / 2),
+            left: Math.max(0, (dims.width - width) / 2),
+            width,
+            height,
+          });
+          return;
+        }
+      }
+      if (isSupported(addElementAtCursor)) {
+        await addElementAtCursor({
+          type: "image",
+          ref,
+          altText,
+        });
+        return;
+      }
+      if (isSupported(addElementAtPoint)) {
+        await addElementAtPoint({
+          type: "image",
+          ref,
+          altText,
+          top: 80,
+          left: 80,
+          width: 400,
+          height: 400,
+        });
+        return;
+      }
+      throw new Error("Adding images is not supported here");
+    },
+    [isSupported],
+  );
+
+  /**
+   * Main generation flow:
+   * 1. Save prompt to history
+   * 2. Show generating view with progress bar
+   * 3. Call generateImages() to get image IDs
+   * 4. Start progress animation (increments 3% per second up to 90%)
+   * 5. Call pollImages() — waits for all images to complete
+   * 6. Set progress to 100%
+   * 7. Map results to { id, url } array
+   * 8. Show results view
+   * On error: show error alert, return to generator view
+   */
   const handleGenerate = async () => {
-    if (!apiKey || !selectedBrand || !prompt.trim() || isGenerating) {
+    if (!apiKey || !selectedBrand || !prompt.trim() || generating) {
       return;
     }
+
+    const trimmed = prompt.trim();
+
+    const startProgressTick = () => {
+      if (progressIntervalRef.current != null) {
+        clearInterval(progressIntervalRef.current);
+      }
+      progressIntervalRef.current = setInterval(() => {
+        setProgress((p) => Math.min(90, p + 3));
+      }, 1000);
+    };
+
+    const stopProgressTick = () => {
+      if (progressIntervalRef.current != null) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
+    };
+
     setGenerationError("");
-    setIsGenerating(true);
+    saveToHistory(trimmed);
+    setGeneratingContext({
+      prompt: trimmed,
+      variants,
+      aspectRatio,
+    });
+    setProgress(0);
+    setView("generating");
+    setGenerating(true);
+
     try {
       const sessionId = resolveBrandSessionId(selectedBrand);
       const ids = await generateImages(
         apiKey,
         sessionId,
-        prompt.trim(),
+        trimmed,
         aspectRatio,
         variants,
       );
+      startProgressTick();
       const done = await pollImages(apiKey, ids);
-      saveToHistory(prompt);
-      const mapped: RecentImage[] = done.map((img: GeneratedImage) => ({
-        id: img.id,
-        url: getImageUrl(img),
+      stopProgressTick();
+      if (!isMounted.current) {
+        return;
+      }
+      setProgress(100);
+      const mapped: GeneratedResult[] = done
+        .map((img: GeneratedImage) => ({
+          id: img.id,
+          url: getImageUrl(img),
+        }))
+        .filter((r) => Boolean(r.url));
+      if (mapped.length === 0) {
+        throw new Error("No completed image URLs returned");
+      }
+      const recentMapped: RecentImage[] = mapped.map((r) => ({
+        id: r.id,
+        url: r.url,
       }));
       setRecentImages((prev) => {
         const byId = new Map(prev.map((r) => [r.id, r]));
-        for (const r of mapped) {
+        for (const r of recentMapped) {
           byId.set(r.id, r);
         }
         const next = [...byId.values()].slice(0, 100);
@@ -550,29 +755,85 @@ export function App() {
         return next;
       });
       void loadRecentGeneratedImages();
+      setResults(mapped);
+      setSelectedResult(mapped[0]?.id ?? "");
+      setInsertError("");
+      setView("results");
     } catch (e) {
+      stopProgressTick();
+      if (!isMounted.current) {
+        return;
+      }
       setGenerationError(
         e instanceof Error ? e.message : "Generation failed",
       );
+      setResults([]);
+      setSelectedResult("");
+      setView("generator");
     } finally {
-      setIsGenerating(false);
+      stopProgressTick();
+      if (isMounted.current) {
+        setGenerating(false);
+        setGeneratingContext(null);
+      }
     }
   };
 
-  const handleInsertImage = async (imageUrl: string) => {
-    const queue = await upload({
-      type: "image",
-      url: imageUrl,
-      mimeType: "image/jpeg",
-      thumbnailUrl: imageUrl,
-      aiDisclosure: "app_generated",
-    });
-    await queue.whenUploaded();
-    await addElementAtCursor({
-      type: "image",
-      ref: queue.ref as ImageRef,
-      altText: { text: "Bloom image", decorative: false },
-    });
+  /**
+   * Inserts the selected result image into the Canva design.
+   * After success: returns to generator, refreshes credits and library.
+   */
+  const handleInsert = async () => {
+    const hit = results.find((r) => r.id === selectedResult);
+    if (hit == null || !hit.url) {
+      setInsertError("Select an image to add");
+      return;
+    }
+    setInsertError("");
+    setInserting(true);
+    try {
+      await uploadAndInsertFromUrl(hit.url);
+      if (!isMounted.current) {
+        return;
+      }
+      setView("generator");
+      setResults([]);
+      setSelectedResult("");
+      setProgress(0);
+      if (apiKey) {
+        void loadCredits(apiKey);
+        void loadRecentGeneratedImages();
+      }
+    } catch (e) {
+      if (!isMounted.current) {
+        return;
+      }
+      setInsertError(e instanceof Error ? e.message : "Insert failed");
+    } finally {
+      if (isMounted.current) {
+        setInserting(false);
+      }
+    }
+  };
+
+  /**
+   * Inserts a specific image from the library into the design.
+   * Used for the Library tab "Add" button.
+   */
+  const handleInsertSpecificRecentImage = async (image: RecentImage) => {
+    setInsertError("");
+    setInsertingImageId(image.id);
+    try {
+      await uploadAndInsertFromUrl(image.url);
+    } catch (e) {
+      if (isMounted.current) {
+        setInsertError(e instanceof Error ? e.message : "Insert failed");
+      }
+    } finally {
+      if (isMounted.current) {
+        setInsertingImageId("");
+      }
+    }
   };
 
   if (view === "boot" && validatingKey) {
@@ -738,6 +999,112 @@ export function App() {
     );
   }
 
+  if (view === "generating") {
+    const meta = generatingContext;
+    const promptLine =
+      meta && meta.prompt.length > 50
+        ? `${meta.prompt.slice(0, 50)}…`
+        : (meta?.prompt ?? "");
+    return (
+      <Box padding="2u">
+        <Rows spacing="2u">
+          <Title size="medium">Generating your images…</Title>
+          <ProgressBar
+            value={Math.min(100, Math.round(progress))}
+            ariaLabel="Generation progress"
+          />
+          {meta ? (
+            <>
+              <Text tone="secondary" size="small">
+                {promptLine}
+              </Text>
+              <Text tone="secondary" size="xsmall">
+                {`${meta.variants} variants · ${meta.aspectRatio}`}
+              </Text>
+            </>
+          ) : null}
+          {generationError ? (
+            <Alert tone="critical" title="Generation error">
+              {generationError}
+            </Alert>
+          ) : null}
+        </Rows>
+      </Box>
+    );
+  }
+
+  if (view === "results") {
+    const count = results.length;
+    return (
+      <Box padding="2u">
+        <Rows spacing="2u">
+          <Button
+            variant="tertiary"
+            type="button"
+            onClick={() => {
+              setView("generator");
+              setResults([]);
+              setSelectedResult("");
+              setInsertError("");
+              setProgress(0);
+            }}
+          >
+            ← Back
+          </Button>
+          <Title size="medium">{`${count} images ready`}</Title>
+          <Grid columns={2} spacing="1u">
+            {results.map((r) => (
+              <ImageCard
+                key={r.id}
+                thumbnailUrl={r.url}
+                alt="Generated result"
+                ariaLabel="Select image"
+                borderRadius="standard"
+                selectable
+                selected={selectedResult === r.id}
+                onClick={() => {
+                  setInsertError("");
+                  setSelectedResult(r.id);
+                }}
+              />
+            ))}
+          </Grid>
+          <Text tone="secondary" size="small">
+            Click to select, then add to your design
+          </Text>
+          {insertError ? (
+            <Alert tone="critical" title="Insert error">
+              {insertError}
+            </Alert>
+          ) : null}
+          <Button
+            variant="primary"
+            type="button"
+            stretch
+            loading={inserting}
+            disabled={inserting || !selectedResult}
+            onClick={() => {
+              void handleInsert();
+            }}
+          >
+            Add to design ↓
+          </Button>
+          <Button
+            variant="secondary"
+            type="button"
+            stretch
+            disabled={inserting || generating}
+            onClick={() => {
+              void handleGenerate();
+            }}
+          >
+            Regenerate
+          </Button>
+        </Rows>
+      </Box>
+    );
+  }
+
   if (view === "generator") {
     const brandLabel = selectedBrand
       ? brandCardTitle(selectedBrand)
@@ -876,9 +1243,9 @@ export function App() {
                 variant="primary"
                 type="button"
                 stretch
-                loading={isGenerating}
+                loading={generating}
                 disabled={
-                  isGenerating ||
+                  generating ||
                   !prompt.trim() ||
                   !selectedBrand
                 }
@@ -905,6 +1272,11 @@ export function App() {
                   Refresh
                 </Button>
               </Box>
+              {insertError ? (
+                <Alert tone="critical" title="Insert error">
+                  {insertError}
+                </Alert>
+              ) : null}
               {loadingRecentImages ? (
                 <Box display="flex" justifyContent="center" paddingY="2u">
                   <LoadingIndicator size="medium" />
@@ -920,10 +1292,11 @@ export function App() {
                       key={img.id}
                       thumbnailUrl={img.url}
                       alt="Generated image"
-                      ariaLabel="Insert image into design"
+                      ariaLabel="Add image to design"
                       borderRadius="standard"
+                      loading={insertingImageId === img.id}
                       onClick={() => {
-                        void handleInsertImage(img.url);
+                        void handleInsertSpecificRecentImage(img);
                       }}
                     />
                   ))}
