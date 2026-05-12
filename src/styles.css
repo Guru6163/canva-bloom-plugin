@@ -1,1 +1,91 @@
-/* App styles */
+/* App styles — layout helpers used with Canva App UI Kit */
+
+/* Results grid — 2 equal columns */
+.results-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* Template pills — wrapping flex row */
+.template-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Aspect ratio pills */
+.ratio-group {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Prompt history chips */
+.history-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Section label above inputs */
+.section-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ui-kit-color-canvas-secondary);
+  margin-bottom: 6px;
+}
+
+/* Section container for consistent spacing */
+.section {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Summary panel showing brand + credits */
+.summary-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.credits-text {
+  font-size: 11px;
+  color: var(--ui-kit-color-canvas-secondary);
+}
+
+/* Library bento grid */
+.bento-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.bento-item {
+  position: relative;
+}
+
+.bento-item-wide {
+  grid-column: span 2;
+}
+
+/* Library hover overlay */
+.image-overlay {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.bento-item:hover .image-overlay {
+  opacity: 1;
+}
+
+/* Library header with refresh button */
+.library-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}

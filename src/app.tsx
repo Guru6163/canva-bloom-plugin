@@ -459,47 +459,6 @@ export function App() {
   };
 
   /**
-   * Clears all stored data and returns to setup.
-   * Called when user wants to change their API key.
-   */
-  const handleReset = () => {
-    if (progressIntervalRef.current != null) {
-      clearInterval(progressIntervalRef.current);
-      progressIntervalRef.current = null;
-    }
-    localStorage.removeItem(STORAGE_KEYS.API_KEY);
-    localStorage.removeItem(STORAGE_KEYS.BRAND_ID);
-    localStorage.removeItem(STORAGE_KEYS.PROMPT_HISTORY);
-    localStorage.removeItem(STORAGE_KEYS.RECENT_IMAGES);
-    setApiKey("");
-    setApiKeyInput("");
-    setBrands([]);
-    setSelectedBrand(null);
-    setShowAddBrand(false);
-    setNewBrandUrl("");
-    setBrandError("");
-    setKeyError("");
-    setPrompt("");
-    setAspectRatio("1:1");
-    setVariants(2);
-    setCredits(null);
-    setActiveTemplate(null);
-    setPromptHistory([]);
-    setGenerationError("");
-    setGeneratorTab("create");
-    setRecentImages([]);
-    setGenerating(false);
-    setProgress(0);
-    setResults([]);
-    setSelectedResult("");
-    setInserting(false);
-    setInsertingImageId("");
-    setInsertError("");
-    setGeneratingContext(null);
-    setView("setup");
-  };
-
-  /**
    * Loads the credit balance from Bloom API and updates state.
    * Silently ignores errors — credits display is informational only.
    */
@@ -898,11 +857,6 @@ export function App() {
     return (
       <Box padding="2u">
         <Rows spacing="2u">
-          <Box display="flex" justifyContent="start">
-            <Button variant="tertiary" type="button" onClick={handleReset}>
-              Reset
-            </Button>
-          </Box>
           <Title size="medium">Select your Brand</Title>
           {brandError && !showAddBrand ? (
             <Text tone="critical" size="small">
@@ -1115,11 +1069,6 @@ export function App() {
     return (
       <Box padding="2u">
         <Rows spacing="2u">
-          <Box display="flex" justifyContent="start">
-            <Button variant="tertiary" type="button" onClick={handleReset}>
-              Reset
-            </Button>
-          </Box>
           <SegmentedControl<"create" | "library">
             value={generatorTab}
             onChange={(v) => {

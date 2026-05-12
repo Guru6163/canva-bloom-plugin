@@ -1,7 +1,7 @@
 {
   "private": true,
-  "name": "bloom-canva",
-  "description": "An empty Canva App",
+  "name": "bloom",
+  "description": "Bloom Canva App",
   "scripts": {
     "extract": "formatjs extract \"src/**/*.{ts,tsx}\" --out-file dist/messages_en.json",
     "build": "webpack --config webpack.config.ts --mode production && npm run extract",
