@@ -1,7 +1,8 @@
 /**
- * utils.ts
+ * @file utils.ts
  *
- * Shared utility functions and constants used across the app.
+ * Shared helpers and static configuration for the Bloom Canva app:
+ * aspect-ratio detection, prompt templates, storage keys, and UI copy constants.
  */
 
 const ASPECT_LABELS = ["9:16", "4:5", "1:1", "16:9"] as const;

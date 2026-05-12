@@ -1,11 +1,8 @@
 /**
- * api.ts
+ * @file api.ts
  *
- * Bloom REST API client for the Canva App.
- * All Bloom API communication goes through this file.
- *
- * Base URL: https://www.trybloom.ai/api/v1
- * Auth: x-api-key header on every request
+ * Bloom REST API client for the Canva app. All Bloom HTTP calls go through
+ * this module. Base URL: https://www.trybloom.ai/api/v1 — auth via `x-api-key`.
  *
  * API docs: https://www.trybloom.ai/api/v1/docs
  */
@@ -54,10 +51,12 @@ export interface ListImagesOptions {
   includeUrls?: boolean;
 }
 
+/** Error thrown when the Bloom API returns a non-success status or invalid payload. */
 class BloomApiError extends Error {
   readonly status: number;
   readonly code?: string;
 
+  /** Creates an error with HTTP status and optional Bloom error code. */
   constructor(message: string, status: number, code?: string) {
     super(message);
     this.name = "BloomApiError";

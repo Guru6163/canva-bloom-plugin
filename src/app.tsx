@@ -1,3 +1,11 @@
+/**
+ * @file app.tsx
+ *
+ * Root React UI for the Bloom Canva app: API key setup, brand selection,
+ * image generation, results, and library. Holds application state and routes
+ * between views.
+ */
+
 import type { ImageMimeType, ImageRef } from "@canva/asset";
 import { upload } from "@canva/asset";
 import { useFeatureSupport } from "@canva/app-hooks";
@@ -6,7 +14,7 @@ import {
   addElementAtPoint,
   getDesignMetadata,
 } from "@canva/design";
-import type { Brand } from "./api";
+import type { Brand, GeneratedImage } from "./api";
 import {
   checkCredits,
   generateImages,
@@ -19,7 +27,6 @@ import {
   resolveBrandSessionId,
   validateKey,
 } from "./api";
-import type { GeneratedImage } from "./api";
 import { ASPECT_RATIOS, PROMPT_TEMPLATES, STORAGE_KEYS } from "./utils";
 import {
   Alert,
@@ -65,6 +72,7 @@ export interface RecentImage {
   createdAt?: string;
 }
 
+/** Resolves after `ms` milliseconds (used for brand onboarding polling). */
 const sleep = (ms: number) => new Promise<void>((resolve) => {
   setTimeout(resolve, ms);
 });
@@ -103,6 +111,10 @@ async function toDataUrl(url: string): Promise<{ dataUrl: string; mimeType: stri
   return { dataUrl, mimeType };
 }
 
+/**
+ * Maps a MIME string from fetch/FileReader to a value accepted by Canva's
+ * {@link upload} for images.
+ */
 function normalizeImageMimeType(raw: string): ImageMimeType {
   const allowed: ImageMimeType[] = [
     "image/jpeg",
@@ -122,6 +134,9 @@ const MAX_PROMPT_LEN = 500;
 const MAX_HISTORY = 10;
 const MAX_LIBRARY_PAGES = 8;
 
+/**
+ * Returns a short display title for a brand card (name, else URL, else fallback).
+ */
 function brandCardTitle(brand: Brand): string {
   const n = brand.name?.trim();
   if (n) {
@@ -134,6 +149,7 @@ function brandCardTitle(brand: Brand): string {
   return "Brand";
 }
 
+/** Reads persisted prompt history from localStorage, or an empty array if missing or invalid. */
 function readPromptHistoryFromStorage(): string[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PROMPT_HISTORY);
@@ -150,6 +166,7 @@ function readPromptHistoryFromStorage(): string[] {
   }
 }
 
+/** Reads persisted recent-library thumbnails from localStorage. */
 function readRecentImagesFromStorage(): RecentImage[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.RECENT_IMAGES);
@@ -180,10 +197,12 @@ function readRecentImagesFromStorage(): RecentImage[] {
   }
 }
 
+/** Writes recent library image metadata to localStorage. */
 function persistRecentImages(images: RecentImage[]) {
   localStorage.setItem(STORAGE_KEYS.RECENT_IMAGES, JSON.stringify(images));
 }
 
+/** Builds a display URL for a library row using the same rules as {@link getImageUrl}. */
 function recordToImageUrl(row: {
   id: string;
   imageUrl?: string;
@@ -214,6 +233,9 @@ const VARIANT_COUNT_OPTIONS: { value: number; label: string }[] = [
 ];
 /* eslint-enable formatjs/no-literal-string-in-object */
 
+/**
+ * Root application component: wires Bloom and Canva SDKs to the multi-step UI.
+ */
 /* eslint-disable formatjs/no-literal-string-in-jsx -- scaffold; replace with intl when wiring copy */
 export function App() {
   const [view, setView] = useState<View>("boot");
@@ -264,6 +286,8 @@ export function App() {
     null,
   );
   const isSupported = useFeatureSupport();
+
+  /** Tracks mount state and clears the generation progress interval on unmount. */
   useEffect(() => {
     isMounted.current = true;
     return () => {
@@ -321,9 +345,13 @@ export function App() {
     [],
   );
 
+  /**
+   * On first mount: restores saved API key, validates it, and loads brands when valid.
+   */
   useEffect(() => {
     let cancelled = false;
 
+    /** Validates a stored API key and routes to setup or brand selection. */
     const run = async () => {
       setValidatingKey(true);
       const saved = localStorage.getItem(STORAGE_KEYS.API_KEY);
@@ -361,6 +389,9 @@ export function App() {
     };
   }, [loadBrands]);
 
+  /**
+   * Validates the API key from the setup screen, persists it, and loads brands.
+   */
   const handleConnect = useCallback(async () => {
     const key = apiKeyInput.trim();
     setKeyError("");
@@ -556,6 +587,7 @@ export function App() {
     }
   }, [apiKey, selectedBrand]);
 
+  /** When entering the generator with a key, refreshes credits and the image library. */
   useEffect(() => {
     if (view === "generator" && apiKey) {
       void loadCredits(apiKey);
@@ -648,6 +680,7 @@ export function App() {
 
     const trimmed = prompt.trim();
 
+    /** Starts a timer that bumps progress toward 90% while images are polling. */
     const startProgressTick = () => {
       if (progressIntervalRef.current != null) {
         clearInterval(progressIntervalRef.current);
@@ -657,6 +690,7 @@ export function App() {
       }, 1000);
     };
 
+    /** Stops the progress timer and clears the interval handle. */
     const stopProgressTick = () => {
       if (progressIntervalRef.current != null) {
         clearInterval(progressIntervalRef.current);
