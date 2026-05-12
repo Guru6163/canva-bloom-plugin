@@ -1,6 +1,6 @@
 import { TestAppI18nProvider } from "@canva/app-i18n-kit";
 import { TestAppUiProvider } from "@canva/app-ui-kit";
-import { render } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { App } from "../../../app";
 
@@ -13,8 +13,14 @@ function renderInTestProvider(node: ReactNode) {
 }
 
 describe("App", () => {
-  it("renders", () => {
-    const result = renderInTestProvider(<App />);
-    expect(result.container.firstChild).toBeNull();
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("shows setup when no saved API key", async () => {
+    renderInTestProvider(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Connect your Bloom account")).toBeDefined();
+    });
   });
 });
